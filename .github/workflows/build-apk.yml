@@ -16,6 +16,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -26,11 +29,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK Platform 35
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Check Android SDK
+        run: |
+          echo "Android SDK: $ANDROID_HOME"
+          ls -la "$ANDROID_HOME/platforms"
+          test -d "$ANDROID_HOME/platforms/android-35" || {
+            echo "ERROR: Android SDK Platform 35 is missing."
+            exit 1
+          }
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
