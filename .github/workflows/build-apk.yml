@@ -1,39 +1,36 @@
+
 name: Build CourseHub Udemy APK
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - '**.java'
-      - '**.xml'
-      - '**.gradle'
+      - '**/*.java'
+      - '**/*.xml'
+      - '**/*.gradle'
+      - '**/*.gradle.kts'
       - 'gradle.properties'
       - '.github/workflows/build-apk.yml'
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      # GitHub's ubuntu-latest runner already includes the Android SDK.
-      # Avoid android-actions/setup-android here because its sdkmanager
-      # update check can fail before the build starts.
-      - name: Verify Android SDK
-        run: |
-          echo "ANDROID_HOME=${ANDROID_HOME}"
-          test -d "${ANDROID_HOME}/platforms/android-35" || {
-            echo "Android SDK platform 35 is not installed on this runner."
-            ls -la "${ANDROID_HOME}/platforms" || true
-            exit 1
-          }
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK Platform 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -41,9 +38,10 @@ jobs:
           gradle-version: '8.9'
 
       - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+        run: gradle --no-daemon assembleDebug --stacktrace
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: CourseHubUdemy-debug-apk
