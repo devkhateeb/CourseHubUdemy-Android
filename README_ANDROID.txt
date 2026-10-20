@@ -1,7 +1,7 @@
 CourseHub Udemy Android project
 ================================
 
-This is the Android source project (not a prebuilt APK). It includes a native dashboard, manual scan/post, per-course manual posting, Telegram bot/channel settings, local duplicate history, optional Supabase shared history, and scheduled background scanning/posting.
+This is the Android source project (not a prebuilt APK). The GitHub Actions workflow was updated to use the Android SDK preinstalled on GitHub's Ubuntu runner and avoid the failing android-actions/setup-android sdkmanager update step. It includes a native dashboard, manual scan/post, per-course manual posting, Telegram bot/channel settings, local duplicate history, optional Supabase shared history, and scheduled background scanning/posting.
 
 BUILD AN APK USING GITHUB ACTIONS (can be done from a phone)
 ===========================================================
@@ -55,3 +55,6 @@ LIMITATIONS
 - Shared duplicate prevention requires the same Supabase project/key and compatible table policies on both devices. Offers already recorded locally are seeded into shared history when cloud history is first enabled.
 - The Android APK has not been compiled in this environment; use the included GitHub Actions workflow to build it.
 - Keep your Telegram bot token private. It is stored in app-private preferences on the device.
+
+DIRECT UDEMY ENROLLMENT LINKS
+The scanner now attempts to resolve FreeWebCart redirect links into direct Udemy course URLs while preserving coupon/affiliate parameters. If it cannot resolve a direct Udemy course URL, it will not publish the FreeWebCart redirect link. Coupon validity and current price are not verified.

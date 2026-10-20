@@ -1,7 +1,5 @@
 package com.coursehubudemy;
 
-import android.os.Handler;
-import android.graphics.drawable.GradientDrawable;
 import android.app.*;
 import android.os.Bundle;
 import android.content.*;
