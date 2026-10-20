@@ -2,8 +2,10 @@ package com.coursehubudemy;
 
 import android.app.*;
 import android.os.Bundle;
+import android.os.Handler;
 import android.content.*;
 import android.graphics.Color;
+import android.graphics.drawable.GradientDrawable;
 import android.view.*;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
