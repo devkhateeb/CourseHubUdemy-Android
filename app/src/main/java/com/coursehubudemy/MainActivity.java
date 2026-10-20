@@ -2,10 +2,12 @@ package com.coursehubudemy;
 
 import android.app.*;
 import android.os.Bundle;
-import android.os.Handler;
 import android.content.*;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.*;
 import android.widget.*;
 import androidx.appcompat.app.AppCompatActivity;
@@ -24,12 +26,16 @@ public class MainActivity extends AppCompatActivity {
     TextView status, stats, log;
     LinearLayout list;
     ProgressBar progress;
+    EditText scanMinInput, postMinInput, postMaxInput;
+    TextView autoStatus;
+    Switch autoSwitch;
+    boolean suppressSwitch=false;
+    android.content.SharedPreferences.OnSharedPreferenceChangeListener prefListener;
     List<Offer> offers=new ArrayList<>();
     ExecutorService executor=Executors.newSingleThreadExecutor();
-    Handler handler=new Handler();
     String token(){return tokenInput.getText().toString().trim();}
     String channel(){return channelInput.getText().toString().trim();}
-    @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("coursehub",MODE_PRIVATE);buildUI();renderSavedStatus();scheduleAuto();}
+    @Override public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("coursehub",MODE_PRIVATE);buildUI();initPrefListener();renderSavedStatus();scheduleAuto();}
     TextView text(String s,int size,String color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.parseColor(color));t.setPadding(0,6,0,6);return t;}
     GradientDrawable bg(String color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(Color.parseColor(color));d.setCornerRadius(radius);return d;}
     Button button(String s,Runnable r){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setTextColor(Color.WHITE);b.setBackground(bg(ACCENT,24));b.setOnClickListener(v->r.run());return b;}
@@ -54,24 +60,46 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout actions=section();root.addView(actions);actions.addView(text("Scan & posting",18,WHITE));
         actions.addView(button("↻  Scan Courses",()->scan(false)));
         actions.addView(button("➤  Post New Offers (Manual)",()->postManual()));
-        Switch auto=new Switch(this);auto.setText("Automatic scanning & posting");auto.setTextColor(Color.WHITE);auto.setChecked(prefs.getBoolean("auto",false));actions.addView(auto);
-        TextView autoHelp=text("Runs periodically in the background (Android may delay it to save battery).",12,MUTED);actions.addView(autoHelp);
-        auto.setOnCheckedChangeListener((v,on)->{prefs.edit().putBoolean("auto",on).apply();scheduleAuto();say(on?"Automatic mode enabled":"Automatic mode paused",on?"#79D8AD":"#F3C969");});
+        actions.addView(text("Background timers",15,WHITE));
+        actions.addView(text("Choose how often the app scans for new courses and how often it posts queued offers to Telegram.",12,MUTED));
+        scanMinInput=numberField(actions,"Scan every (minutes, minimum "+AutoEngine.MIN_SCAN_MIN+")",prefs.getInt("scanMin",AutoEngine.DEFAULT_SCAN_MIN));
+        postMinInput=numberField(actions,"Post every (minutes, minimum "+AutoEngine.MIN_POST_MIN+")",prefs.getInt("postMin",AutoEngine.DEFAULT_POST_MIN));
+        postMaxInput=numberField(actions,"Max courses per post run",prefs.getInt("postMax",AutoEngine.DEFAULT_POST_MAX));
+        actions.addView(button("Save timers",()->saveTimers(true)));
+        autoSwitch=new Switch(this);autoSwitch.setText("Automatic scanning & posting");autoSwitch.setTextColor(Color.WHITE);autoSwitch.setChecked(prefs.getBoolean("auto",false));actions.addView(autoSwitch);
+        actions.addView(text("Runs in the background on your timers. A notification shows live scan and post progress while it works.",12,MUTED));
+        autoStatus=text("● "+(prefs.getBoolean("auto",false)?prefs.getString("autoStatus","Starting…"):"Background mode off"),12,"#79D8AD");actions.addView(autoStatus);
+        autoSwitch.setOnCheckedChangeListener((v,on)->{
+            if(suppressSwitch)return;
+            if(on){
+                if(!saveSettings()||!saveTimers(false)){suppressSwitch=true;autoSwitch.setChecked(false);suppressSwitch=false;return;}
+                prefs.edit().putBoolean("auto",true).putLong("nextScanAt",0).putLong("nextPostAt",0).putString("autoStatus","Starting…").apply();
+                askNotificationPermission();
+                scheduleAuto();
+                say("Automatic mode on · scan every "+prefs.getInt("scanMin",AutoEngine.DEFAULT_SCAN_MIN)+" min, post every "+prefs.getInt("postMin",AutoEngine.DEFAULT_POST_MIN)+" min","#79D8AD");
+            }else{
+                prefs.edit().putBoolean("auto",false).putString("autoStatus","Background mode off").apply();
+                AutoService.stop(this);scheduleAuto();
+                say("Automatic mode paused","#F3C969");
+            }
+        });
+        actions.addView(button("Allow unrestricted battery use",()->requestBatteryExemption()));
         actions.addView(button("Run automatic scan now",()->{saveSettings();scan(true);}));
         root.addView(text("Course offers",20,WHITE));list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);root.addView(list);
         LinearLayout history=section();root.addView(history);history.addView(text("Activity",18,WHITE));log=text("No activity yet.",13,MUTED);history.addView(log);
         progress=new ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal);progress.setVisibility(View.GONE);root.addView(progress);
         root.addView(text("Note: source-listed offers are not verified on Udemy. Coupon validity may change.",11,MUTED));
     }
-    void saveSettings(){
+    boolean saveSettings(){
         String t=token(),c=channel();
         String url=supabaseUrlInput==null?prefs.getString("supabaseUrl",""):supabaseUrlInput.getText().toString().trim();
         String key=supabaseKeyInput==null?prefs.getString("supabaseKey",""):supabaseKeyInput.getText().toString().trim();
-        if(t.isEmpty()||c.isEmpty()){say("Enter bot token and channel first","#F3C969");return;}
-        if(url.isEmpty()!=key.isEmpty()){say("Enter both Supabase URL and key, or leave both blank","#F3C969");return;}
-        if(!url.isEmpty()&&!url.startsWith("https://")){say("Supabase URL must start with https://","#F3C969");return;}
+        if(t.isEmpty()||c.isEmpty()){say("Enter bot token and channel first","#F3C969");return false;}
+        if(url.isEmpty()!=key.isEmpty()){say("Enter both Supabase URL and key, or leave both blank","#F3C969");return false;}
+        if(!url.isEmpty()&&!url.startsWith("https://")){say("Supabase URL must start with https://","#F3C969");return false;}
         prefs.edit().putString("token",t).putString("channel",c).putString("supabaseUrl",url).putString("supabaseKey",key).apply();
         say(url.isEmpty()?"Settings saved · local history only":"Settings saved · shared cloud history configured","#79D8AD");
+        return true;
     }
     void say(String s,String color){status.setText("● "+s);status.setTextColor(Color.parseColor(color));addLog(s);}
     void addLog(String s){if(log!=null)log.setText(new Date().toString()+"\n"+s+"\n\n"+log.getText());}
@@ -97,6 +125,7 @@ public class MainActivity extends AppCompatActivity {
         if(t.isEmpty()||c.isEmpty()){say("Add Telegram settings first","#F3C969");return;}
         executor.execute(()->{
             int sent=0,skipped=0,errors=0;
+            synchronized(AutoEngine.LOCK){
             Set<String> posted=new HashSet<>(prefs.getStringSet("posted",new HashSet<>()));
             String cloudUrl=prefs.getString("supabaseUrl",""); String cloudKey=prefs.getString("supabaseKey","");
             boolean shared=SupabaseHistory.configured(cloudUrl,cloudKey);
@@ -115,16 +144,59 @@ public class MainActivity extends AppCompatActivity {
                 }catch(Exception e){errors++;if(shared&&claimed){try{SupabaseHistory.markStatus(cloudUrl,cloudKey,o.id,"failed");}catch(Exception ignored){}}
                     String err=e.getMessage();runOnUiThread(()->say("Telegram error: "+err,"#FF8D9B"));}
             }
+            }
             int finalSent=sent,finalSkipped=skipped,finalErrors=errors;
             runOnUiThread(()->{stats.setText(offers.size()+" offers found  ·  "+prefs.getStringSet("posted",new HashSet<>()).size()+" posted on this device");say((automatic?"Auto":"Manual")+" posting finished: "+finalSent+" sent, "+finalSkipped+" duplicates skipped, "+finalErrors+" errors",finalErrors>0?"#F3C969":"#79D8AD");showOffers();});
         });
     }
 
+    /** WorkManager is only a ~15-min watchdog now; the foreground service runs the user's timers. */
     void scheduleAuto(){
         WorkManager wm=WorkManager.getInstance(this);wm.cancelUniqueWork("coursehub-auto-scan");
         if(!prefs.getBoolean("auto",false))return;
         PeriodicWorkRequest req=new PeriodicWorkRequest.Builder(AutoWorker.class,15,TimeUnit.MINUTES).setConstraints(new Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build();
         wm.enqueueUniquePeriodicWork("coursehub-auto-scan",ExistingPeriodicWorkPolicy.UPDATE,req);
+        if(!AutoService.isRunning()){try{AutoService.start(this);}catch(Exception e){addLog("Could not start background service: "+e.getMessage());}}
     }
+    EditText numberField(LinearLayout parent,String label,int value){
+        parent.addView(text(label,12,MUTED));
+        EditText e=new EditText(this);e.setSingleLine(true);e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);e.setTextColor(Color.WHITE);e.setHintTextColor(Color.GRAY);e.setText(String.valueOf(value));parent.addView(e);return e;
+    }
+    Integer parseNum(EditText e){try{return Integer.parseInt(e.getText().toString().trim());}catch(Exception x){return null;}}
+    boolean saveTimers(boolean announce){
+        Integer s=parseNum(scanMinInput),p=parseNum(postMinInput),m=parseNum(postMaxInput);
+        if(s==null||s<AutoEngine.MIN_SCAN_MIN){say("Scan timer must be "+AutoEngine.MIN_SCAN_MIN+" minutes or more","#F3C969");return false;}
+        if(p==null||p<AutoEngine.MIN_POST_MIN){say("Post timer must be "+AutoEngine.MIN_POST_MIN+" minute or more","#F3C969");return false;}
+        if(m==null||m<1||m>50){say("Courses per post run must be between 1 and 50","#F3C969");return false;}
+        prefs.edit().putInt("scanMin",s).putInt("postMin",p).putInt("postMax",m).apply();
+        if(announce)say("Timers saved · scan every "+s+" min, post every "+p+" min, up to "+m+" per run","#79D8AD");
+        return true;
+    }
+    void askNotificationPermission(){
+        if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS},77);
+    }
+    void requestBatteryExemption(){
+        try{
+            PowerManager pm=(PowerManager)getSystemService(POWER_SERVICE);
+            if(pm.isIgnoringBatteryOptimizations(getPackageName())){say("Battery use is already unrestricted","#79D8AD");return;}
+            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,android.net.Uri.parse("package:"+getPackageName())));
+        }catch(Exception e){try{startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));}catch(Exception ignored){}}
+    }
+    void initPrefListener(){
+        prefListener=(sp,key)->{
+            if("autoStatus".equals(key)&&autoStatus!=null)autoStatus.setText("● "+sp.getString("autoStatus","Background mode off"));
+            else if("auto".equals(key)&&autoSwitch!=null){boolean on=sp.getBoolean("auto",false);if(autoSwitch.isChecked()!=on){suppressSwitch=true;autoSwitch.setChecked(on);suppressSwitch=false;}}
+            else if("posted".equals(key)&&stats!=null)stats.setText(offers.size()+" offers found  ·  "+sp.getStringSet("posted",new HashSet<>()).size()+" posted");
+        };
+    }
+    @Override protected void onStart(){
+        super.onStart();
+        boolean on=prefs.getBoolean("auto",false);
+        if(autoSwitch!=null&&autoSwitch.isChecked()!=on){suppressSwitch=true;autoSwitch.setChecked(on);suppressSwitch=false;}
+        if(autoStatus!=null)autoStatus.setText("● "+(on?prefs.getString("autoStatus","Starting…"):"Background mode off"));
+        if(prefListener!=null)prefs.registerOnSharedPreferenceChangeListener(prefListener);
+    }
+    @Override protected void onStop(){super.onStop();if(prefListener!=null)prefs.unregisterOnSharedPreferenceChangeListener(prefListener);}
     @Override protected void onDestroy(){super.onDestroy();executor.shutdownNow();}
 }

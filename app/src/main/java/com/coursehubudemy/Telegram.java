@@ -19,10 +19,7 @@ public class Telegram {
     }
     private static String enc(String s) throws Exception{return java.net.URLEncoder.encode(s,"UTF-8");}
     public static void send(String token,String channel,Offer o) throws Exception {
-        String link=o.link();
-        if(link==null||!link.matches("(?i)^https?://([^/]+\\.)?udemy\\.com/course/.*"))
-            throw new Exception("No direct Udemy course URL was resolved; skipped to avoid posting a FreeWebCart redirect.");
-        String msg="🔥 <b>100% Free Course Alert!</b> 🔥\n\n📚 <b>Course Title:</b> "+escape(o.title)+
+        String link=o.link(); String msg="🔥 <b>100% Free Course Alert!</b> 🔥\n\n📚 <b>Course Title:</b> "+escape(o.title)+
           "\n\n🔗 <b>Enroll Link:</b> <a href=\""+escape(link)+"\">Click Here to Enroll</a>\n\nHurry up and enroll now! This is a limited time offer.\n\n#FreeCourse #CourseHubUdemy";
         String api="https://api.telegram.org/bot"+token+"/";
         if(!o.imageUrl.isEmpty()){
