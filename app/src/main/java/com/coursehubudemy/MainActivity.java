@@ -50,6 +50,8 @@ public class MainActivity extends AppCompatActivity {
         LinearLayout controls=section();root.addView(controls);controls.addView(text("Telegram setup",18,WHITE));
         tokenInput=new EditText(this);tokenInput.setSingleLine(true);tokenInput.setHint("Telegram bot token");tokenInput.setHintTextColor(Color.GRAY);tokenInput.setTextColor(Color.WHITE);tokenInput.setInputType(129);tokenInput.setText(prefs.getString("token",""));controls.addView(tokenInput);
         channelInput=new EditText(this);channelInput.setSingleLine(true);channelInput.setHint("Channel username, e.g. @coursehubudemy");channelInput.setHintTextColor(Color.GRAY);channelInput.setTextColor(Color.WHITE);channelInput.setText(prefs.getString("channel","@coursehubudemy"));controls.addView(channelInput);
+        Switch cleanLinks=new Switch(this);cleanLinks.setText("Clean Udemy link (remove tracking parameters)");cleanLinks.setTextColor(Color.WHITE);cleanLinks.setChecked(prefs.getBoolean("cleanLinks",true));cleanLinks.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean("cleanLinks",on).apply());controls.addView(cleanLinks);
+        controls.addView(text("Posts always use the direct udemy.com course link, never the freewebcart.com redirect.",11,MUTED));
         controls.addView(button("Save Telegram settings",()->saveSettings()));
         LinearLayout cloud=section();root.addView(cloud);cloud.addView(text("Shared cloud history (optional)",18,WHITE));
         cloud.addView(text("Use the same Supabase project on your PC and phone to share duplicate history.",12,MUTED));
@@ -138,7 +140,7 @@ public class MainActivity extends AppCompatActivity {
                     catch(Exception e){errors++;String err=e.getMessage();runOnUiThread(()->say("Shared history error; skipped course: "+err,"#FF8D9B"));continue;}
                 }
                 try{
-                    Telegram.send(t,c,o); sent++;
+                    Telegram.send(t,c,o,prefs.getBoolean("cleanLinks",true)); sent++;
                     if(shared){try{SupabaseHistory.markStatus(cloudUrl,cloudKey,o.id,"posted");}catch(Exception e){String err=e.getMessage();runOnUiThread(()->say("Posted to Telegram, but could not update cloud status: "+err,"#F3C969"));}}
                     posted.add(o.id);prefs.edit().putStringSet("posted",new HashSet<>(posted)).apply();
                 }catch(Exception e){errors++;if(shared&&claimed){try{SupabaseHistory.markStatus(cloudUrl,cloudKey,o.id,"failed");}catch(Exception ignored){}}
@@ -169,6 +171,7 @@ public class MainActivity extends AppCompatActivity {
         if(p==null||p<AutoEngine.MIN_POST_MIN){say("Post timer must be "+AutoEngine.MIN_POST_MIN+" minute or more","#F3C969");return false;}
         if(m==null||m<1||m>50){say("Courses per post run must be between 1 and 50","#F3C969");return false;}
         prefs.edit().putInt("scanMin",s).putInt("postMin",p).putInt("postMax",m).apply();
+        if(prefs.getBoolean("auto",false)&&AutoService.isRunning())AutoService.poke(this);
         if(announce)say("Timers saved · scan every "+s+" min, post every "+p+" min, up to "+m+" per run","#79D8AD");
         return true;
     }

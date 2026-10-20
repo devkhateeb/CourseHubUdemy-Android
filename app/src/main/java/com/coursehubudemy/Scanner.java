@@ -18,7 +18,9 @@ public class Scanner {
         Matcher m=Pattern.compile("(?:coupon(?:\\s+code)?|code)\\s*[:：\\-]?\\s*([A-Z0-9]{5,25})",Pattern.CASE_INSENSITIVE).matcher(url+"\n"+text);
         if(m.find()) return m.group(1).toUpperCase(Locale.ROOT); return "";
     }
-    public static List<Offer> scan(int pages, Progress progress) throws Exception {
+    public static List<Offer> scan(int pages, Progress progress) throws Exception { return scan(pages,progress,null); }
+    /** cache: source URL -> previously parsed Offer; those course pages are not downloaded again. */
+    public static List<Offer> scan(int pages, Progress progress, Map<String,Offer> cache) throws Exception {
         LinkedHashMap<String,Offer> found=new LinkedHashMap<>();
         List<String> listingUrls=new ArrayList<>();
         listingUrls.add(ROOT);
@@ -64,6 +66,8 @@ public class Scanner {
                 String href=en.getKey(), title=en.getValue();
                 progress.update("Listing "+(p+1)+"/"+listingUrls.size()+" · reading course "+idx+" of "+cands.size()+" · "+found.size()+" found");
                 progress.percent((int)((p+(double)idx/cands.size())*100.0/listingUrls.size()));
+                Offer cachedOffer=cache==null?null:cache.get(href);
+                if(cachedOffer!=null){found.put(href,cachedOffer);continue;}
                 try{
                     Document detail=Jsoup.connect(href).userAgent("Mozilla/5.0 (Android) AppleWebKit/537.36 Chrome/124 Safari/537.36").timeout(15000).get();
                     Element h=detail.selectFirst("h1"); if(h!=null&&!h.text().trim().isEmpty()) title=h.text().trim();

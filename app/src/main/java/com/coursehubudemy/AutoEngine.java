@@ -2,6 +2,9 @@ package com.coursehubudemy;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
+import org.json.JSONObject;
 import org.json.JSONArray;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -20,10 +23,43 @@ public final class AutoEngine {
     /** Held while the posted-history is read/modified so manual and automatic posting can't double-post. */
     public static final Object LOCK = new Object();
     public static final String PREFS = "coursehub";
-    public static final int DEFAULT_SCAN_MIN = 60, DEFAULT_POST_MIN = 15, DEFAULT_POST_MAX = 5;
+    public static final int DEFAULT_SCAN_MIN = 120, DEFAULT_POST_MIN = 30, DEFAULT_POST_MAX = 5;
     public static final int MIN_SCAN_MIN = 5, MIN_POST_MIN = 1;
     private static final long RETRY_MS = 5 * 60 * 1000L;
     private static final int PAGES = 3;
+    private static final long CACHE_MS = 6 * 60 * 60 * 1000L;   // reuse parsed course pages for 6 h
+
+    private static boolean hasNetwork(Context c) {
+        try {
+            ConnectivityManager cm = (ConnectivityManager) c.getSystemService(Context.CONNECTIVITY_SERVICE);
+            android.net.Network n = cm.getActiveNetwork();
+            if (n == null) return false;
+            NetworkCapabilities nc = cm.getNetworkCapabilities(n);
+            return nc != null && nc.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+        } catch (Exception e) { return true; }
+    }
+    private static void loadCache(SharedPreferences sp, Map<String, Offer> cache, Map<String, Long> stamps) {
+        try {
+            JSONObject co = new JSONObject(sp.getString("offerCache", "{}"));
+            long now = System.currentTimeMillis();
+            Iterator<String> it = co.keys();
+            while (it.hasNext()) {
+                String k = it.next(); JSONObject e = co.getJSONObject(k); long t = e.optLong("t");
+                if (now - t < CACHE_MS) { cache.put(k, Offer.fromJson(e.getJSONObject("o"))); stamps.put(k, t); }
+            }
+        } catch (Exception ignored) {}
+    }
+    private static void saveCache(SharedPreferences sp, List<Offer> all, Map<String, Long> stamps) {
+        try {
+            JSONObject co = new JSONObject(); long now = System.currentTimeMillis();
+            for (Offer o : all) {
+                Long t = stamps.get(o.sourceUrl);
+                JSONObject e = new JSONObject(); e.put("t", t == null ? now : t); e.put("o", o.toJson());
+                co.put(o.sourceUrl, e);
+            }
+            sp.edit().putString("offerCache", co.toString()).apply();
+        } catch (Exception ignored) {}
+    }
 
     public interface Listener { void progress(String phase, String text, int percent); }
     private static final Listener NOOP = (p, t, c) -> {};
@@ -76,7 +112,10 @@ public final class AutoEngine {
         Summary s = new Summary();
         Listener ls = l == null ? NOOP : l;
         try {
-            List<Offer> all = Scanner.scan(PAGES, new ScanProgress(ls));
+            Map<String, Offer> cache = new HashMap<>(); Map<String, Long> stamps = new HashMap<>();
+            loadCache(sp, cache, stamps);
+            List<Offer> all = Scanner.scan(PAGES, new ScanProgress(ls), cache);
+            if (!all.isEmpty()) saveCache(sp, all, stamps);
             synchronized (LOCK) {
                 Set<String> posted = new HashSet<>(sp.getStringSet("posted", new HashSet<>()));
                 List<Offer> fresh = new ArrayList<>();
@@ -134,7 +173,7 @@ public final class AutoEngine {
                 }
                 attempts++;
                 try {
-                    Telegram.send(token, channel, o);
+                    Telegram.send(token, channel, o, sp.getBoolean("cleanLinks", true));
                     posted.add(o.id);
                     sp.edit().putStringSet("posted", new HashSet<>(posted)).apply();
                     s.sent++; finished.add(o.id);
@@ -167,10 +206,11 @@ public final class AutoEngine {
     public static boolean anyDue(SharedPreferences sp) {
         capSchedule(sp);
         long now = System.currentTimeMillis();
-        return now >= sp.getLong("nextScanAt", 0) || now >= sp.getLong("nextPostAt", 0);
+        return now >= sp.getLong("nextScanAt", 0) || (now >= sp.getLong("nextPostAt", 0) && pendingCount(sp) > 0);
     }
     public static long nextWake(SharedPreferences sp) {
-        return Math.min(sp.getLong("nextScanAt", 0), sp.getLong("nextPostAt", 0));
+        long ns = sp.getLong("nextScanAt", 0), np = sp.getLong("nextPostAt", 0);
+        return pendingCount(sp) > 0 ? Math.min(ns, np) : ns;   // nothing queued -> no need to wake for posting
     }
 
     /** Runs whichever timers are due (scan first, then post so fresh offers can go out in the same run). */
@@ -178,13 +218,21 @@ public final class AutoEngine {
         SharedPreferences sp = prefs(ctx);
         Cycle c = new Cycle();
         capSchedule(sp);
+        if (!hasNetwork(ctx)) {   // don't spin up radios/wake locks with no internet; retry shortly
+            long now = System.currentTimeMillis(), retry = now + RETRY_MS;
+            SharedPreferences.Editor e = sp.edit();
+            if (now >= sp.getLong("nextScanAt", 0)) e.putLong("nextScanAt", retry);
+            if (now >= sp.getLong("nextPostAt", 0)) e.putLong("nextPostAt", retry);
+            e.putString("lastStatus", "Waiting for internet connection").apply();
+            return c;
+        }
         if (System.currentTimeMillis() >= sp.getLong("nextScanAt", 0)) {
             c.scan = scan(ctx, l);
             long full = scanMin(sp) * 60000L;
             long gap = c.scan.error.isEmpty() ? full : Math.min(full, RETRY_MS);   // failed scan retries sooner
             sp.edit().putLong("nextScanAt", System.currentTimeMillis() + gap).apply();
         }
-        if (System.currentTimeMillis() >= sp.getLong("nextPostAt", 0)) {
+        if (System.currentTimeMillis() >= sp.getLong("nextPostAt", 0) && pendingCount(sp) > 0) {
             c.post = post(ctx, l);
             sp.edit().putLong("nextPostAt", System.currentTimeMillis() + postMin(sp) * 60000L).apply();
         }

@@ -37,7 +37,18 @@ SETUP
      queue (about 1.5 s apart). Timers survive app restarts and phone reboots.
    - Tap "Allow unrestricted battery use" and, on some phones (Xiaomi, Oppo, Vivo, Samsung, etc.), also set the app's
      battery mode to Unrestricted / allow autostart in system settings. Otherwise the phone may pause the app.
+   - Battery tips: scan every 120+ minutes (the site changes slowly), post every 30+ minutes, keep "Max courses per post
+     run" modest, and turn automatic mode off when you don't need it. The app now makes no periodic wake-ups, skips
+     course pages it already read in the last 6 hours, and does nothing while offline.
    - A 15-minute WorkManager watchdog restarts the background service if the phone killed it.
+
+DIRECT UDEMY LINKS (1.3)
+========================
+Telegram posts now use the real udemy.com course link, not the freewebcart.com/redirect/... link. The app follows
+the redirect when posting (HTTP redirects, page/JavaScript redirects and affiliate links that wrap the Udemy URL).
+By default tracking parameters are removed, giving https://www.udemy.com/course/<name>/?couponCode=<CODE>.
+Turn off "Clean Udemy link" in Telegram setup to keep the full link with all parameters. If the Udemy link cannot be
+found, that course is NOT posted (so a freewebcart link never goes out) and it is retried on the next run.
 
 SUPABASE TABLE SQL
 ==================

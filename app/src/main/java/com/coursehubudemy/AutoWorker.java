@@ -17,7 +17,7 @@ public class AutoWorker extends Worker {
         Context ctx = getApplicationContext();
         SharedPreferences sp = AutoEngine.prefs(ctx);
         if (!sp.getBoolean("auto", false)) return Result.success();
-        if (AutoService.isRunning()) return Result.success();
+        if (AutoService.isRunning()) { AutoService.poke(ctx); return Result.success(); }
         try {
             AutoService.start(ctx);
             return Result.success();

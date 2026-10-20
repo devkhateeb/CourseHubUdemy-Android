@@ -14,8 +14,7 @@ import android.os.PowerManager;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutorService;
 
 /** Foreground service that owns the user's scan/post timers and shows live progress in a notification. */
 public class AutoService extends Service {
@@ -25,13 +24,17 @@ public class AutoService extends Service {
     public static final String ACTION_TICK = "com.coursehubudemy.TICK";
     private static volatile boolean running = false;
 
-    private ScheduledExecutorService ex;
+    private ExecutorService ex;
     private boolean foregroundStarted = false;
     private volatile long lastShown = 0;
 
     public static boolean isRunning() { return running; }
     public static void start(Context c) {
         ContextCompat.startForegroundService(c, new Intent(c, AutoService.class).setAction(ACTION_START));
+    }
+    /** Ask a running service to re-check its schedule (after timers change, or from the watchdog). */
+    public static void poke(Context c) {
+        try { c.startService(new Intent(c, AutoService.class).setAction(ACTION_TICK)); } catch (Exception ignored) {}
     }
     public static void stop(Context c) { c.stopService(new Intent(c, AutoService.class)); }
 
@@ -60,12 +63,8 @@ public class AutoService extends Service {
         running = true;
         if (!sp.getBoolean("auto", false)) { shutdown(); return START_NOT_STICKY; }
         if (ACTION_RUN_NOW.equals(action)) sp.edit().putLong("nextScanAt", 0).putLong("nextPostAt", 0).apply();
-        if (ex == null) {
-            ex = Executors.newSingleThreadScheduledExecutor();
-            ex.scheduleWithFixedDelay(this::safeTick, 0, 30, TimeUnit.SECONDS);
-        } else {
-            ex.execute(this::safeTick);
-        }
+        if (ex == null) ex = Executors.newSingleThreadExecutor();
+        ex.execute(this::safeTick);   // no polling: the next wake-up is a single alarm set at the end of each tick
         return START_STICKY;
     }
 

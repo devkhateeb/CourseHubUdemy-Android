@@ -18,8 +18,10 @@ public class Telegram {
         return j;
     }
     private static String enc(String s) throws Exception{return java.net.URLEncoder.encode(s,"UTF-8");}
-    public static void send(String token,String channel,Offer o) throws Exception {
-        String link=o.link(); String msg="🔥 <b>100% Free Course Alert!</b> 🔥\n\n📚 <b>Course Title:</b> "+escape(o.title)+
+    public static void send(String token,String channel,Offer o) throws Exception { send(token,channel,o,true); }
+    /** The enroll link is resolved to the real Udemy course URL first; clean=true removes tracking parameters. */
+    public static void send(String token,String channel,Offer o,boolean clean) throws Exception {
+        String link=LinkResolver.finalLink(o,clean); String msg="🔥 <b>100% Free Course Alert!</b> 🔥\n\n📚 <b>Course Title:</b> "+escape(o.title)+
           "\n\n🔗 <b>Enroll Link:</b> <a href=\""+escape(link)+"\">Click Here to Enroll</a>\n\nHurry up and enroll now! This is a limited time offer.\n\n#FreeCourse #CourseHubUdemy";
         String api="https://api.telegram.org/bot"+token+"/";
         if(!o.imageUrl.isEmpty()){
